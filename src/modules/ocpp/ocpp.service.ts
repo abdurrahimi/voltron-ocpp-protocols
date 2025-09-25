@@ -160,7 +160,22 @@ export class OcppService {
   private parseStartTransactionPayload(
     payload: unknown,
   ): StartTransactionPayload {
-    return parseStartTransaction(payload);
+    try {
+      return parseStartTransaction(payload);
+    } catch (error) {
+      const parsedError = error as Error;
+      this.logger.error(
+        `Failed to parse StartTransaction payload: ${parsedError.message}`,
+        parsedError.stack,
+      );
+      this.logger.warn(
+        `StartTransaction payload validation failed. Raw payload: ${JSON.stringify(payload)}`,
+      );
+      this.logger.log(
+        'StartTransaction request received with an invalid payload. Propagating validation error.',
+      );
+      throw error;
+    }
   }
 
   private parseStopTransactionPayload(
