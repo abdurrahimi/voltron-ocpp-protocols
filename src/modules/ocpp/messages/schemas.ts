@@ -88,11 +88,20 @@ function ensureString(value: unknown, field: string): string {
   return value;
 }
 
-function ensureOptionalString(value: unknown): string | undefined {
+function ensureOptionalString(
+  value: unknown,
+  field = 'value',
+): string | undefined {
   if (value === undefined || value === null) {
     return undefined;
   }
-  return ensureString(value, 'value');
+  if (typeof value !== 'string') {
+    throw new OcppCallError(
+      'TypeConstraintViolation',
+      `${field} must be a string`,
+    );
+  }
+  return value.trim().length === 0 ? undefined : value;
 }
 
 function ensureNumber(value: unknown, field: string): number {
@@ -126,13 +135,22 @@ export function parseBootNotification(
       'chargePointVendor',
     ),
     chargePointModel: ensureString(data.chargePointModel, 'chargePointModel'),
-    chargePointSerialNumber: ensureOptionalString(data.chargePointSerialNumber),
-    chargeBoxSerialNumber: ensureOptionalString(data.chargeBoxSerialNumber),
-    firmwareVersion: ensureOptionalString(data.firmwareVersion),
-    iccid: ensureOptionalString(data.iccid),
-    imsi: ensureOptionalString(data.imsi),
-    meterSerialNumber: ensureOptionalString(data.meterSerialNumber),
-    meterType: ensureOptionalString(data.meterType),
+    chargePointSerialNumber: ensureOptionalString(
+      data.chargePointSerialNumber,
+      'chargePointSerialNumber',
+    ),
+    chargeBoxSerialNumber: ensureOptionalString(
+      data.chargeBoxSerialNumber,
+      'chargeBoxSerialNumber',
+    ),
+    firmwareVersion: ensureOptionalString(data.firmwareVersion, 'firmwareVersion'),
+    iccid: ensureOptionalString(data.iccid, 'iccid'),
+    imsi: ensureOptionalString(data.imsi, 'imsi'),
+    meterSerialNumber: ensureOptionalString(
+      data.meterSerialNumber,
+      'meterSerialNumber',
+    ),
+    meterType: ensureOptionalString(data.meterType, 'meterType'),
   };
 }
 
@@ -154,9 +172,12 @@ export function parseStatusNotification(
     timestamp: data.timestamp
       ? ensureTimestamp(data.timestamp, 'timestamp')
       : undefined,
-    info: ensureOptionalString(data.info),
-    vendorId: ensureOptionalString(data.vendorId),
-    vendorErrorCode: ensureOptionalString(data.vendorErrorCode),
+    info: ensureOptionalString(data.info, 'info'),
+    vendorId: ensureOptionalString(data.vendorId, 'vendorId'),
+    vendorErrorCode: ensureOptionalString(
+      data.vendorErrorCode,
+      'vendorErrorCode',
+    ),
   };
 }
 
@@ -182,8 +203,8 @@ export function parseStopTransaction(payload: unknown): StopTransactionPayload {
     transactionId: ensureNumber(data.transactionId, 'transactionId'),
     meterStop: ensureNumber(data.meterStop, 'meterStop'),
     timestamp: ensureTimestamp(data.timestamp, 'timestamp'),
-    idTag: ensureOptionalString(data.idTag),
-    reason: ensureOptionalString(data.reason),
+    idTag: ensureOptionalString(data.idTag, 'idTag'),
+    reason: ensureOptionalString(data.reason, 'reason'),
   };
 }
 
@@ -191,12 +212,12 @@ function parseSampledValue(value: unknown, index: number): SampledValue {
   const entry = ensureObject(value, `sampledValue[${index}]`);
   return {
     value: ensureString(entry.value, 'value'),
-    context: ensureOptionalString(entry.context),
-    format: ensureOptionalString(entry.format),
-    measurand: ensureOptionalString(entry.measurand),
-    phase: ensureOptionalString(entry.phase),
-    location: ensureOptionalString(entry.location),
-    unit: ensureOptionalString(entry.unit),
+    context: ensureOptionalString(entry.context, 'context'),
+    format: ensureOptionalString(entry.format, 'format'),
+    measurand: ensureOptionalString(entry.measurand, 'measurand'),
+    phase: ensureOptionalString(entry.phase, 'phase'),
+    location: ensureOptionalString(entry.location, 'location'),
+    unit: ensureOptionalString(entry.unit, 'unit'),
   };
 }
 
