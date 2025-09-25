@@ -327,7 +327,7 @@ export class ChargingStationService {
   async handleStartTransaction(
     identity: string,
     payload: StartTransactionPayload,
-  ): Promise<{ transactionId: number }> {
+  ): Promise<{ transactionId: number; idTagInfo: { status: string } }> {
     const startedAt = new Date(payload.timestamp);
 
     if (!this.useFallback()) {
@@ -364,7 +364,12 @@ export class ChargingStationService {
       this.memoryTransactions.set(transactionId, { stationIdentity: identity });
       station.status = StationStatus.CHARGING;
 
-      return { transactionId };
+      return {
+        transactionId,
+        idTagInfo: {
+          status: 'Accepted',
+        },
+      };
     }
 
     const station = await this.ensureStation(identity);
@@ -421,7 +426,12 @@ export class ChargingStationService {
       },
     );
 
-    return { transactionId: Number(transaction.id) };
+    return {
+      transactionId: Number(transaction.id),
+      idTagInfo: {
+        status: 'Accepted',
+      },
+    };
   }
 
   async handleStopTransaction(payload: StopTransactionPayload): Promise<void> {
