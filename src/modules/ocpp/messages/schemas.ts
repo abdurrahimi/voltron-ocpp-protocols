@@ -63,7 +63,8 @@ export interface MeterValuesPayload {
   meterValue: MeterValueEntry[];
 }
 
-const ISO_DATE_REGEX = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/;
+const ISO_DATE_REGEX =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?$/;
 
 function ensureObject(
   value: unknown,
@@ -122,7 +123,12 @@ function ensureTimestamp(value: unknown, field: string): string {
       `${field} must be an ISO-8601 timestamp`,
     );
   }
-  return timestamp;
+
+  if (/[+-]\d{2}:\d{2}$/.test(timestamp) || timestamp.endsWith('Z')) {
+    return timestamp;
+  }
+
+  return `${timestamp}Z`;
 }
 
 export function parseBootNotification(
@@ -143,7 +149,10 @@ export function parseBootNotification(
       data.chargeBoxSerialNumber,
       'chargeBoxSerialNumber',
     ),
-    firmwareVersion: ensureOptionalString(data.firmwareVersion, 'firmwareVersion'),
+    firmwareVersion: ensureOptionalString(
+      data.firmwareVersion,
+      'firmwareVersion',
+    ),
     iccid: ensureOptionalString(data.iccid, 'iccid'),
     imsi: ensureOptionalString(data.imsi, 'imsi'),
     meterSerialNumber: ensureOptionalString(
