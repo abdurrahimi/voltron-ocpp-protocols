@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 
-import { PrismaModule } from 'src/prisma/prisma.module';
+import { PrismaModule } from 'src/modules/prisma/prisma.module';
 import { OcppConfigurationModule } from 'src/configurations/ocpp/ocpp-configuration.module';
 
 import { OcppService } from './ocpp.service';

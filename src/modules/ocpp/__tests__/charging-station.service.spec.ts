@@ -1,5 +1,5 @@
 import { OcppConfigurationService } from 'src/configurations/ocpp/ocpp-configuration.service';
-import { PrismaService } from 'src/prisma/prisma.service';
+import { PrismaService } from 'src/modules/prisma/prisma.service';
 
 import { ChargingStationService } from '../services/charging-station.service';
 import { OcppCallError } from '../ocpp.errors';

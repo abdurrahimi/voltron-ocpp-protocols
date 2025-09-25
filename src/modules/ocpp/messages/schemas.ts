@@ -12,6 +12,10 @@ export interface BootNotificationPayload {
   meterType?: string;
 }
 
+export interface AuthorizePayload {
+  idTag: string;
+}
+
 export interface StatusNotificationPayload {
   connectorId: number;
   errorCode: string;
@@ -129,6 +133,13 @@ export function parseBootNotification(
     imsi: ensureOptionalString(data.imsi),
     meterSerialNumber: ensureOptionalString(data.meterSerialNumber),
     meterType: ensureOptionalString(data.meterType),
+  };
+}
+
+export function parseAuthorize(payload: unknown): AuthorizePayload {
+  const data = ensureObject(payload, 'Authorize');
+  return {
+    idTag: ensureString(data.idTag, 'idTag'),
   };
 }
 
