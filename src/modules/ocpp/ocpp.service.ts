@@ -3,8 +3,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ChargingStationService } from './services/charging-station.service';
 import { ConnectionManager } from './connection/connection-manager';
 import {
+  AuthorizePayload,
   BootNotificationPayload,
   MeterValuesPayload,
+  parseAuthorize,
   parseBootNotification,
   parseMeterValues,
   parseStartTransaction,
@@ -73,6 +75,14 @@ export class OcppService {
         return this.createCallResult(
           uniqueId,
           await this.chargingStationService.handleHeartbeat(identity),
+        );
+      case 'Authorize':
+        return this.createCallResult(
+          uniqueId,
+          await this.chargingStationService.handleAuthorize(
+            identity,
+            this.parseAuthorizePayload(payload),
+          ),
         );
       case 'StatusNotification':
         await this.chargingStationService.handleStatusNotification(
@@ -161,5 +171,9 @@ export class OcppService {
 
   private parseMeterValuesPayload(payload: unknown): MeterValuesPayload {
     return parseMeterValues(payload);
+  }
+
+  private parseAuthorizePayload(payload: unknown): AuthorizePayload {
+    return parseAuthorize(payload);
   }
 }

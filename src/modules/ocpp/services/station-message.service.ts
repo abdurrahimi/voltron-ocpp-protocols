@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { MessageStatus, Prisma } from '@prisma/client';
 import { v4 as uuid } from 'uuid';
 
-import { PrismaService } from 'src/prisma/prisma.service';
+import { PrismaService } from 'src/modules/prisma/prisma.service';
 
 export interface QueueMessageInput {
   stationId: string;

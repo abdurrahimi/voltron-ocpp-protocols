@@ -9,9 +9,10 @@ import {
   TransactionStatus,
 } from '@prisma/client';
 
-import { PrismaService } from 'src/prisma/prisma.service';
+import { PrismaService } from 'src/modules/prisma/prisma.service';
 import { OcppConfigurationService } from 'src/configurations/ocpp/ocpp-configuration.service';
 import {
+  AuthorizePayload,
   BootNotificationPayload,
   MeterValuesPayload,
   StartTransactionPayload,
@@ -38,6 +39,12 @@ interface MemoryTransactionState {
   meterStop?: number;
   stoppedAt?: Date;
   reason?: string | null;
+  reservationId?: number | null;
+}
+
+interface MemoryTransactionIndex {
+  stationIdentity: string;
+  dbTransactionId?: bigint;
 }
 
 interface MemoryStationState {
@@ -83,16 +90,21 @@ export class ChargingStationService {
   };
 
   private readonly memoryStations = new Map<string, MemoryStationState>();
-  private readonly memoryTransactions = new Map<
-    number,
-    { stationIdentity: string }
-  >();
+  private readonly memoryTransactions = new Map<number, MemoryTransactionIndex>();
   private nextFallbackTransactionId = 1;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly ocppConfig: OcppConfigurationService,
-  ) {}
+  ) {
+    if (typeof this.prisma.onConnectionStatusChange === 'function') {
+      this.prisma.onConnectionStatusChange((connected) => {
+        if (connected) {
+          void this.promoteAllMemoryStations();
+        }
+      });
+    }
+  }
 
   async handleBootNotification(
     identity: string,
@@ -176,8 +188,34 @@ export class ChargingStationService {
     };
   }
 
+  async handleAuthorize(
+    identity: string,
+    _payload: AuthorizePayload,
+  ): Promise<{ idTagInfo: { status: string } }> {
+    const now = new Date();
+
+    if (this.useFallback()) {
+      const station = this.getOrCreateMemoryStation(identity);
+      station.lastHeartbeatAt = now;
+      return { idTagInfo: { status: 'Accepted' } };
+    }
+
+    const station = await this.ensureStation(identity);
+
+    await this.prisma.chargingStation.update({
+      where: { id: station.id },
+      data: { lastHeartbeatAt: now },
+    });
+
+    return { idTagInfo: { status: 'Accepted' } };
+  }
+
   async handleHeartbeat(identity: string): Promise<{ currentTime: string }> {
     const now = new Date();
+
+    if (!this.useFallback()) {
+      await this.promoteMemoryStation(identity);
+    }
 
     if (this.useFallback()) {
       const station = this.getOrCreateMemoryStation(identity);
@@ -207,6 +245,10 @@ export class ChargingStationService {
     const statusTimestamp = payload.timestamp
       ? new Date(payload.timestamp)
       : new Date();
+
+    if (!this.useFallback()) {
+      await this.promoteMemoryStation(identity);
+    }
 
     if (this.useFallback()) {
       const station = this.getOrCreateMemoryStation(identity);
@@ -288,6 +330,10 @@ export class ChargingStationService {
   ): Promise<{ transactionId: number }> {
     const startedAt = new Date(payload.timestamp);
 
+    if (!this.useFallback()) {
+      await this.promoteMemoryStation(identity);
+    }
+
     if (this.useFallback()) {
       const station = this.getOrCreateMemoryStation(identity);
       const transactionId = this.nextFallbackTransactionId;
@@ -312,6 +358,7 @@ export class ChargingStationService {
         meterStart: payload.meterStart,
         startedAt,
         status: TransactionStatus.STARTED,
+        reservationId: payload.reservationId ?? null,
       };
       station.transactions.set(transactionId, transaction);
       this.memoryTransactions.set(transactionId, { stationIdentity: identity });
@@ -378,8 +425,13 @@ export class ChargingStationService {
   }
 
   async handleStopTransaction(payload: StopTransactionPayload): Promise<void> {
-    if (this.useFallback()) {
-      const mapping = this.memoryTransactions.get(payload.transactionId);
+    const mapping = this.memoryTransactions.get(payload.transactionId);
+
+    if (!this.useFallback() && mapping && mapping.dbTransactionId === undefined) {
+      await this.promoteMemoryStation(mapping.stationIdentity);
+    }
+
+    if (this.useFallback() || (mapping && mapping.dbTransactionId === undefined)) {
       if (!mapping) {
         throw new OcppCallError(
           'PropertyConstraintViolation',
@@ -414,7 +466,8 @@ export class ChargingStationService {
       return;
     }
 
-    const transactionId = BigInt(payload.transactionId);
+    const transactionId =
+      mapping?.dbTransactionId ?? BigInt(payload.transactionId);
     const existing = await this.prisma.transaction.findUnique({
       where: { id: transactionId },
     });
@@ -458,12 +511,20 @@ export class ChargingStationService {
         stoppedAt: payload.timestamp,
       },
     );
+
+    if (mapping) {
+      this.memoryTransactions.delete(payload.transactionId);
+    }
   }
 
   async handleMeterValues(
     identity: string,
     payload: MeterValuesPayload,
   ): Promise<void> {
+    if (!this.useFallback()) {
+      await this.promoteMemoryStation(identity);
+    }
+
     if (this.useFallback()) {
       // In-memory mode does not persist meter values but acknowledges receipt.
       return;
@@ -471,9 +532,15 @@ export class ChargingStationService {
 
     const station = await this.ensureStation(identity);
 
-    const transactionId = payload.transactionId
-      ? BigInt(payload.transactionId)
-      : undefined;
+    let transactionId: bigint | undefined;
+    if (payload.transactionId !== undefined) {
+      const mapping = this.memoryTransactions.get(payload.transactionId);
+      if (mapping?.dbTransactionId !== undefined) {
+        transactionId = mapping.dbTransactionId;
+      } else {
+        transactionId = BigInt(payload.transactionId);
+      }
+    }
 
     const rows: Prisma.MeterValueCreateManyInput[] = [];
 
@@ -512,6 +579,10 @@ export class ChargingStationService {
   }
 
   async getStationByIdentity(identity: string): Promise<StationRecord | null> {
+    if (!this.useFallback()) {
+      await this.promoteMemoryStation(identity);
+    }
+
     if (this.useFallback()) {
       const station = this.memoryStations.get(identity);
       return station ? this.buildStationRecord(station) : null;
@@ -547,6 +618,116 @@ export class ChargingStationService {
       );
     }
     return station;
+  }
+
+  private async promoteAllMemoryStations(): Promise<void> {
+    const identities = Array.from(this.memoryStations.keys());
+    for (const identity of identities) {
+      try {
+        await this.promoteMemoryStation(identity);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.warn(
+          `Failed to persist buffered state for station ${identity}: ${message}`,
+        );
+      }
+    }
+  }
+
+  private async promoteMemoryStation(identity: string): Promise<void> {
+    if (this.useFallback()) {
+      return;
+    }
+
+    const station = this.memoryStations.get(identity);
+    if (!station) {
+      return;
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      const persistedStation = await tx.chargingStation.upsert({
+        where: { ocppIdentity: station.identity },
+        create: {
+          id: station.id,
+          ocppIdentity: station.identity,
+          vendor: station.vendor,
+          model: station.model,
+          serialNumber: station.serialNumber,
+          firmwareVersion: station.firmwareVersion,
+          endpoint: station.endpoint,
+          lastHeartbeatAt: station.lastHeartbeatAt,
+          status: station.status,
+        },
+        update: {
+          vendor: station.vendor,
+          model: station.model,
+          serialNumber: station.serialNumber,
+          firmwareVersion: station.firmwareVersion,
+          endpoint: station.endpoint,
+          lastHeartbeatAt: station.lastHeartbeatAt,
+          status: station.status,
+        },
+      });
+
+      const connectorIdMap = new Map<number, bigint>();
+      for (const [ocppConnectorId, connectorState] of station.connectors.entries()) {
+        const connector = await tx.chargingConnector.upsert({
+          where: {
+            stationId_ocppConnectorId: {
+              stationId: persistedStation.id,
+              ocppConnectorId,
+            },
+          },
+          create: {
+            stationId: persistedStation.id,
+            ocppConnectorId,
+            status: connectorState.status,
+            errorCode: connectorState.errorCode,
+            info: connectorState.info,
+            vendorErrorCode: connectorState.vendorErrorCode,
+            statusTimestamp: connectorState.statusTimestamp,
+          },
+          update: {
+            status: connectorState.status,
+            errorCode: connectorState.errorCode,
+            info: connectorState.info,
+            vendorErrorCode: connectorState.vendorErrorCode,
+            statusTimestamp: connectorState.statusTimestamp,
+          },
+        });
+        connectorIdMap.set(ocppConnectorId, connector.id);
+      }
+
+      for (const transaction of station.transactions.values()) {
+        const connectorDbId =
+          transaction.connectorId === undefined
+            ? null
+            : connectorIdMap.get(transaction.connectorId) ?? null;
+
+        const created = await tx.transaction.create({
+          data: {
+            stationId: persistedStation.id,
+            connectorId: connectorDbId,
+            ocppConnectorId: transaction.connectorId,
+            idTag: transaction.idTag,
+            meterStart: transaction.meterStart,
+            meterStop: transaction.meterStop ?? null,
+            startedAt: transaction.startedAt,
+            stoppedAt: transaction.stoppedAt ?? null,
+            reason: transaction.reason ?? null,
+            status: transaction.status,
+            reservationId: transaction.reservationId ?? null,
+          },
+        });
+
+        this.memoryTransactions.set(transaction.id, {
+          stationIdentity: station.identity,
+          dbTransactionId: created.id,
+        });
+      }
+    });
+
+    this.memoryStations.delete(identity);
   }
 
   private deriveStationStatus(connectorStatus: ConnectorStatus): StationStatus {
