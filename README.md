@@ -30,7 +30,7 @@ A TypeScript/NestJS microservice that implements the OCPP 1.6j protocol for mana
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-- **OcppWebSocketServer** exposes the WebSocket endpoint at `/ocpp/:identity`, performs low-level WebSocket handshakes, and orchestrates request/response flow.
+- **OcppWebSocketServer** exposes the WebSocket endpoint at `/v1/ocpp/:identity`, performs low-level WebSocket handshakes, and orchestrates request/response flow.
 - **OcppService** handles message routing, validation, protocol-specific responses, and error mapping.
 - **ConnectionManager** keeps track of every connected station, handles reconnection replacement, and guarantees graceful shutdown.
 - **ChargingStationService** encapsulates all persistence logic (stations, connectors, transactions, meter values) using Prisma + TimescaleDB features.
