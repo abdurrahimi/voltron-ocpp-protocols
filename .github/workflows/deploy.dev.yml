@@ -1,0 +1,55 @@
+name: Deploy Esomasi Main Service
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+env:
+  APP_NAME: main-service
+  STACK_NAME: main
+  REGISTRY: ghcr.io
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set variables
+        run: |
+          REPO_OWNER=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
+          RAW_VERSION=${GITHUB_REF#refs/tags/}
+          VERSION=$(echo "$RAW_VERSION" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]//g')
+          IMAGE=$REGISTRY/$REPO_OWNER/esomasi_main
+
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "IMAGE=$IMAGE" >> $GITHUB_ENV
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_TOKEN }}
+
+      - name: Build & push Docker image
+        run: |
+          docker build -t $IMAGE:$VERSION -t $IMAGE:latest .
+          docker push $IMAGE:$VERSION
+          docker push $IMAGE:latest
+
+      - name: Deploy to server
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.PROD_IP }}
+          username: ${{ secrets.PROD_USER }}
+          key: ${{ secrets.PROD_KEY }}
+          script: |
+            IMAGE=ghcr.io/${{ github.repository_owner }}/esomasi_main:latest
+            echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ secrets.GHCR_USER }} --password-stdin
+            docker pull $IMAGE
+            docker stack deploy -c /root/deploy/main-service.yml main --with-registry-auth
+            docker service update --force main_main-service

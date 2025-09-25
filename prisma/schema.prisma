@@ -1,0 +1,175 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum StationStatus {
+  AVAILABLE
+  CHARGING
+  FAULTED
+  UNAVAILABLE
+  OFFLINE
+  FINISHING
+  PREPARING
+  RESERVED
+  SUSPENDEDEV
+  SUSPENDEDEVSE
+}
+
+enum ConnectorStatus {
+  AVAILABLE
+  PREPARING
+  CHARGING
+  SUSPENDEDEV
+  SUSPENDEDEVSE
+  FINISHING
+  RESERVED
+  UNAVAILABLE
+  FAULTED
+}
+
+enum TransactionStatus {
+  STARTED
+  COMPLETED
+  STOPPED
+  ERRORED
+}
+
+enum MessageStatus {
+  PENDING
+  DISPATCHED
+  FAILED
+}
+
+enum StationLogEvent {
+  BOOT_NOTIFICATION
+  HEARTBEAT
+  STATUS_NOTIFICATION
+  START_TRANSACTION
+  STOP_TRANSACTION
+  METER_VALUES
+}
+
+model ChargingStation {
+  id              String              @id @default(uuid()) @db.Uuid
+  ocppIdentity    String              @unique
+  status          StationStatus       @default(OFFLINE)
+  lastHeartbeatAt DateTime?
+  vendor          String?
+  model           String?
+  serialNumber    String?
+  firmwareVersion String?
+  ocppVersion     String              @default("1.6")
+  endpoint        String?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  connectors      ChargingConnector[]
+  transactions    Transaction[]
+  meterValues     MeterValue[]
+  messages        StationMessage[]
+  eventLogs       StationEventLog[]
+
+  @@map("charging_stations")
+}
+
+model ChargingConnector {
+  id               BigInt           @id @default(autoincrement())
+  stationId        String           @db.Uuid
+  ocppConnectorId  Int
+  status           ConnectorStatus  @default(AVAILABLE)
+  errorCode        String?          @db.VarChar(100)
+  info             String?
+  vendorErrorCode  String?
+  statusTimestamp  DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  station          ChargingStation  @relation(fields: [stationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  transactions     Transaction[]
+
+  @@unique([stationId, ocppConnectorId], map: "station_connector_unique")
+  @@map("charging_connectors")
+}
+
+model Transaction {
+  id              BigInt            @id @default(autoincrement())
+  stationId       String           @db.Uuid
+  connectorId     BigInt?
+  ocppConnectorId Int
+  idTag           String
+  meterStart      Int
+  meterStop       Int?
+  startedAt       DateTime
+  stoppedAt       DateTime?
+  reason          String?
+  status          TransactionStatus @default(STARTED)
+  reservationId   Int?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  meterValues     MeterValue[]
+  station         ChargingStation   @relation(fields: [stationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  connector       ChargingConnector? @relation(fields: [connectorId], references: [id], onDelete: SetNull)
+  messages        StationMessage[]
+
+  @@map("transactions")
+  @@index([stationId, status], map: "transactions_station_status_idx")
+}
+
+model MeterValue {
+  id            BigInt           @id @default(autoincrement())
+  stationId     String           @db.Uuid
+  connectorId   Int
+  transactionId BigInt?
+  sampledAt     DateTime
+  value         Decimal          @db.Decimal(18, 6)
+  context       String?          @db.VarChar(100)
+  format        String?          @db.VarChar(50)
+  measurand     String?          @db.VarChar(100)
+  phase         String?          @db.VarChar(100)
+  location      String?          @db.VarChar(100)
+  unit          String?          @db.VarChar(30)
+  createdAt     DateTime         @default(now())
+  station       ChargingStation  @relation(fields: [stationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  transaction   Transaction?     @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+
+  @@map("meter_values")
+  @@index([stationId, sampledAt], map: "meter_values_station_time_idx")
+  @@index([transactionId], map: "meter_values_transaction_idx")
+}
+
+model StationMessage {
+  id            BigInt          @id @default(autoincrement())
+  stationId     String         @db.Uuid
+  transactionId BigInt?
+  action        String          @db.VarChar(100)
+  payload       Json
+  uniqueId      String          @unique
+  status        MessageStatus   @default(PENDING)
+  errorDetails  Json?
+  availableAt   DateTime?
+  sentAt        DateTime?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  station       ChargingStation @relation(fields: [stationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  transaction   Transaction?    @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+
+  @@map("station_messages")
+  @@index([stationId, status], map: "station_messages_status_idx")
+}
+
+model StationEventLog {
+  id        BigInt          @id @default(autoincrement())
+  stationId String         @db.Uuid
+  eventType StationLogEvent
+  payload   Json
+  metadata  Json?
+  createdAt DateTime        @default(now())
+  station   ChargingStation @relation(fields: [stationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@map("station_event_logs")
+  @@index([stationId, createdAt], map: "station_event_logs_station_created_idx")
+  @@index([stationId, eventType, createdAt], map: "station_event_logs_type_idx")
+}
